@@ -1,4 +1,4 @@
-pyTelegramBotAPI
+
 flask
-gunicorn
-python-dotenv
+pyTelegramBotAPI>=4.0
+python-dotenv>=1.0
