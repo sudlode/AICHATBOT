@@ -1,59 +1,105 @@
 import os
-import telebot
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-from flask import Flask, request
+import logging
+from telebot import TeleBot, types
+from telebot.util import quick_markup
+from dotenv import load_dotenv
 
-# Конфігурація
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = "https://your-render-app.onrender.com/webhook"
-ADMINS = [1119767022]  # Ваш Telegram ID
+# Налаштування логування
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Ініціалізація
-bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
+# Завантаження конфігурації
+load_dotenv()
 
-# Клавіатура
-def main_keyboard():
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(KeyboardButton("ℹ️ Допомога"))
-    markup.add(KeyboardButton("🎤 Голосове"))
-    return markup
+class Config:
+    BOT_TOKEN = os.getenv('BOT_TOKEN')
+    ADMINS = [1119767022]  # Ваш Telegram ID
 
-# Команди
+# Перевірка токена
+if not Config.BOT_TOKEN:
+    logger.error("Не вказано BOT_TOKEN у змінних середовища!")
+    exit(1)
+
+# Ініціалізація бота
+bot = TeleBot(Config.BOT_TOKEN)
+
+# Клавіатури
+def main_menu():
+    return quick_markup({
+        'ℹ️ Допомога': {'callback_data': 'help'},
+        '🎤 Голосове': {'callback_data': 'voice'},
+        '👨‍💻 Адмінка': {'callback_data': 'admin'}
+    }, row_width=2)
+
+# Обробники подій
 @bot.message_handler(commands=['start'])
-def start(message):
-    bot.reply_to(message, "🚀 Бот запущений!", reply_markup=main_keyboard())
+def send_welcome(message):
+    try:
+        bot.reply_to(
+            message,
+            "🌟 Вітаю! Я ваш бот-помічник.",
+            reply_markup=main_menu()
+        )
+        logger.info(f"Новий користувач: {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"Помилка в /start: {e}")
 
-@bot.message_handler(commands=['admin'])
-def admin_panel(message):
-    if message.from_user.id not in ADMINS:
-        return
-    bot.send_message(message.chat.id, "👨‍💻 Адмін-панель:", reply_markup=admin_keyboard())
+@bot.callback_query_handler(func=lambda call: True)
+def handle_buttons(call):
+    try:
+        if call.data == 'help':
+            bot.send_message(
+                call.message.chat.id,
+                "📚 Доступні команди:\n"
+                "/start - Головне меню\n"
+                "/voice - Голосові повідомлення"
+            )
+        elif call.data == 'voice':
+            msg = bot.send_message(
+                call.message.chat.id,
+                "Напишіть текст для перетворення у голос:"
+            )
+            bot.register_next_step_handler(msg, process_voice)
+        elif call.data == 'admin':
+            if call.from_user.id in Config.ADMINS:
+                show_admin_panel(call.message)
+            else:
+                bot.answer_callback_query(call.id, "⛔ Доступ заборонено!")
+    except Exception as e:
+        logger.error(f"Помилка обробки кнопки: {e}")
 
-# Обробник текстових повідомлень
-@bot.message_handler(content_types=['text'])
-def handle_text(message):
-    if message.text == "ℹ️ Допомога":
-        bot.send_message(message.chat.id, "Список команд:\n/start - Перезапуск\n/admin - Адмінка")
-    elif message.text == "🎤 Голосове":
-        bot.send_message(message.chat.id, "Напишіть текст для перетворення у голос (напр. 'голос Привіт')")
+def process_voice(message):
+    try:
+        text = message.text.strip()
+        if not text:
+            bot.reply_to(message, "❌ Ви не ввели текст!")
+            return
+            
+        # Тут буде логіка генерації голосу
+        bot.reply_to(message, f"🔊 Ваш текст: {text}")
+    except Exception as e:
+        logger.error(f"Помилка обробки голосу: {e}")
 
-# Вебхук для Render
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return ''
-    else:
-        return 'Bad request', 400
+def show_admin_panel(message):
+    try:
+        bot.send_message(
+            message.chat.id,
+            "👨‍💻 Адмін-панель:",
+            reply_markup=quick_markup({
+                '📊 Статистика': {'callback_data': 'stats'},
+                '📢 Розсилка': {'callback_data': 'broadcast'}
+            })
+        )
+    except Exception as e:
+        logger.error(f"Помилка адмін-панелі: {e}")
 
-# Запуск
+# Запуск бота
 if __name__ == '__main__':
-    if os.getenv("ENV") == "production":
-        bot.remove_webhook()
-        bot.set_webhook(url=WEBHOOK_URL)
-        app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
-    else:
-        bot.polling(none_stop=True)
+    logger.info("Бот запускається...")
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        logger.critical(f"Збій у роботі бота: {e}")
