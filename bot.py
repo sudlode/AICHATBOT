@@ -4,7 +4,7 @@ from flask import Flask
 from telebot import TeleBot, types
 
 # Конфігурація
-BOT_TOKEN = 7738138408:AAEMrBTn7b-G4I483n_f2b7ceKhl2eSRkdQ "  # Замініть на реальний токен
+BOT_TOKEN = "7738138408:AAEMrBTn7b-G4I483n_f2b7ceKhl2eSRkdQ"  # Замініть на реальний токен
 ADMIN_ID = 1119767022  # Ваш Telegram ID
 
 # Ініціалізація
