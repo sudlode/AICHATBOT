@@ -2,9 +2,10 @@ import os
 import logging
 import sqlite3
 from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types, executor
-from aiogram.dispatcher import FSMContext
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.fsm.strategy import FSMStrategy
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 import openai
 import matplotlib.pyplot as plt
@@ -20,8 +21,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Ініціалізація бота
 bot = Bot(token=TELEGRAM_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+dp = Dispatcher(storage=MemoryStorage())
 
 # Підключення до БД
 def get_db():
@@ -57,107 +57,25 @@ CREATE TABLE IF NOT EXISTS limits (
 )
 ''')
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS promo_codes (
-    code TEXT PRIMARY KEY,
-    reward_type TEXT,
-    reward_value TEXT,
-    created_by INTEGER,
-    uses_left INTEGER,
-    expires_at TEXT
-)
-''')
-
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS activated_promos (
-    user_id INTEGER,
-    code TEXT,
-    activated_at TEXT,
-    PRIMARY KEY (user_id, code)
-)
-''')
-
 conn.commit()
 
 # Константи
 ADMINS = [1119767022]  # Ваш Telegram ID
 LANGUAGES = {'uk': '🇺🇦 Українська', 'en': '🇬🇧 English'}
 
-# Клавіатури
+# Клавіатура
 def get_main_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    keyboard.add(
-        KeyboardButton('/kontrolni 📝'),
-        KeyboardButton('/gdz 📚'),
-        KeyboardButton('/spusuvanna ✍️'),
-        KeyboardButton('/promo 🎁'),
-        KeyboardButton('/shawarma 🌯'),
-        KeyboardButton('/help ❓')
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='/kontrolni 📝'), KeyboardButton(text='/gdz 📚')],
+            [KeyboardButton(text='/spusuvanna ✍️'), KeyboardButton(text='/promo 🎁')],
+            [KeyboardButton(text='/shawarma 🌯'), KeyboardButton(text='/help ❓')]
+        ],
+        resize_keyboard=True
     )
-    return keyboard
 
-# Генерація медіа
-async def generate_image(user_id: int, prompt: str):
-    cursor.execute("SELECT images_left FROM limits WHERE user_id=?", (user_id,))
-    if cursor.fetchone()[0] <= 0:
-        return None, "❌ Ліміт зображень вичерпано (100/день)"
-    
-    response = openai.Image.create(
-        prompt=prompt,
-        n=1,
-        size="512x512"
-    )
-    image_url = response['data'][0]['url']
-    
-    cursor.execute(
-        "UPDATE limits SET images_left = images_left - 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-    
-    return image_url, None
-
-async def generate_audio(user_id: int, text: str, lang='uk'):
-    cursor.execute("SELECT audio_left FROM limits WHERE user_id=?", (user_id,))
-    if cursor.fetchone()[0] <= 0:
-        return None, "❌ Ліміт аудіо вичерпано (100/день)"
-    
-    tts = gTTS(text=text, lang=lang)
-    audio_buffer = io.BytesIO()
-    tts.write_to_fp(audio_buffer)
-    audio_buffer.seek(0)
-    
-    cursor.execute(
-        "UPDATE limits SET audio_left = audio_left - 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-    
-    return audio_buffer, None
-
-async def generate_circle(user_id: int):
-    cursor.execute("SELECT circles_left FROM limits WHERE user_id=?", (user_id,))
-    if cursor.fetchone()[0] <= 0:
-        return None, "❌ Ліміт кружечків вичерпано (100/день)"
-    
-    img = Image.new('RGB', (512, 512), color=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse([(50, 50), (462, 462)], outline='white', width=10)
-    
-    img_buffer = io.BytesIO()
-    img.save(img_buffer, format='PNG')
-    img_buffer.seek(0)
-    
-    cursor.execute(
-        "UPDATE limits SET circles_left = circles_left - 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-    
-    return img_buffer, None
-
-# Команди
-@dp.message_handler(commands=['start'])
+# Обробник команди /start
+@dp.message(Command('start'))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     if user_id in ADMINS:
@@ -177,29 +95,26 @@ async def cmd_start(message: types.Message):
         )
         conn.commit()
 
-@dp.message_handler(commands=['kontrolni'])
+# Обробник команди /kontrolni
+@dp.message(Command('kontrolni'))
 async def cmd_kontrolni(message: types.Message):
-    task = message.get_args()
+    task = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
     if not task:
         return await message.answer("📝 Напишіть завдання після команди")
     
     response = await generate_ai_response(f"Розв'яжи контрольну роботу: {task}", 'uk')
     await message.answer(f"📚 Розв'язок:\n{response}")
 
-@dp.message_handler(commands=['gen_image'])
-async def cmd_gen_image(message: types.Message):
-    prompt = message.get_args()
-    if not prompt:
-        return await message.answer("ℹ️ Напишіть опис зображення після команди")
-    
-    image_url, error = await generate_image(message.from_user.id, prompt)
-    if error:
-        return await message.answer(error)
-    
-    await bot.send_photo(message.chat.id, image_url)
+# Функція для генерації тексту через OpenAI
+async def generate_ai_response(prompt: str, lang: str) -> str:
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message['content']
 
-# Запуск
-async def on_startup(dp):
+# Запуск бота
+async def on_startup():
     await reset_daily_limits()
 
 async def reset_daily_limits():
@@ -211,4 +126,5 @@ async def reset_daily_limits():
     conn.commit()
 
 if __name__ == '__main__':
-    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
+    dp.startup.register(on_startup)
+    dp.run_polling(bot, skip_updates=True)
