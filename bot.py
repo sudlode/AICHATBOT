@@ -25,18 +25,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Перевірка токенів
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+TOKEN = os.getenv("TOKEN", "").strip()
+KEY = os.getenv("KEY", "").strip()
 
-if not TELEGRAM_TOKEN or ":" not in TELEGRAM_TOKEN:
+if not TOKEN or ":" not in TOKEN:
     logger.error("❌ Невірний Telegram токен! Формат: 123456789:ABCdef...")
     exit(1)
 
-bot = Bot(token=TELEGRAM_TOKEN)
+bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-if OPENAI_API_KEY:
-    openai.api_key = OPENAI_API_KEY
+if KEY:
+    key = KEY
 else:
     logger.warning("⚠️ OpenAI ключ відсутній - деякі функції обмежені")
 
