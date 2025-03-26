@@ -4,6 +4,5 @@ gtts
 matplotlib
 pillow
 python-dotenv
-sqlite3
 requests
 deep-translator
