@@ -17,23 +17,28 @@ import random
 import requests
 from deep_translator import GoogleTranslator
 
-# Налаштування
-logging.basicConfig(level=logging.INFO)
+# Налаштування логування
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Перевірка токенів
-TELEGRAM_TOKEN = "7738138408:AAEMrBTn7b-G4I483n_f2b7ceKhl2eSRkdQ"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
-if not TELEGRAM_TOKEN:
-    logger.error("❌ Telegram token not found!")
+if not TELEGRAM_TOKEN or ":" not in TELEGRAM_TOKEN:
+    logger.error("❌ Невірний Telegram токен! Формат: 123456789:ABCdef...")
     exit(1)
-
-if not OPENAI_API_KEY:
-    logger.warning("⚠️ OpenAI key not found - some functions will be disabled")
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
+if OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
+else:
+    logger.warning("⚠️ OpenAI ключ відсутній - деякі функції обмежені")
 
 # База даних
 def get_db():
@@ -42,7 +47,7 @@ def get_db():
 conn = get_db()
 cursor = conn.cursor()
 
-# Ініціалізація БД
+# Ініціалізація таблиць
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -89,6 +94,16 @@ def get_main_keyboard():
         KeyboardButton('/promo 🎁'),
         KeyboardButton('/shawarma 🌯'),
         KeyboardButton('/help ❓')
+    )
+    return keyboard
+
+def get_admin_keyboard():
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(
+        KeyboardButton('/promo_create'),
+        KeyboardButton('/promo_list'),
+        KeyboardButton('/ban_user'),
+        KeyboardButton('/unban_user')
     )
     return keyboard
 
@@ -152,10 +167,24 @@ async def generate_circle(user_id: int):
     
     return img_buffer, None
 
+async def generate_ai_response(prompt: str, lang: str) -> str:
+    if not OPENAI_API_KEY:
+        return "OpenAI API ключ не налаштовано"
+    
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message['content']
+
 # Команди
 @dp.message(Command('start'))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
+    if user_id in ADMINS:
+        await message.answer("👑 Вітаю, адміне!", reply_markup=get_admin_keyboard())
+    else:
+        await message.answer("🏫 Вітаю у Шкільному помічнику!", reply_markup=get_main_keyboard())
     
     cursor.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,))
     if not cursor.fetchone():
@@ -168,8 +197,6 @@ async def cmd_start(message: types.Message):
             (user_id, datetime.now().isoformat())
         )
         conn.commit()
-    
-    await message.answer("🏫 Вітаю у Шкільному помічнику!", reply_markup=get_main_keyboard())
 
 @dp.message(Command('kontrolni'))
 async def cmd_kontrolni(message: types.Message):
@@ -179,6 +206,24 @@ async def cmd_kontrolni(message: types.Message):
     
     response = await generate_ai_response(f"Розв'яжи контрольну роботу: {task}", 'uk')
     await message.answer(f"📚 Розв'язок:\n{response}")
+
+@dp.message(Command('gdz'))
+async def cmd_gdz(message: types.Message):
+    task = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+    if not task:
+        return await message.answer("📖 Напишіть предмет та номер завдання")
+    
+    response = await generate_ai_response(f"Напиши детальний розв'язок для: {task}", 'uk')
+    await message.answer(f"📝 ГДЗ:\n{response}")
+
+@dp.message(Command('spusuvanna'))
+async def cmd_spusuvanna(message: types.Message):
+    task = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+    if not task:
+        return await message.answer("✍️ Опишіть завдання, з яким потрібна допомога")
+    
+    response = await generate_ai_response(f"Допоможи з виконанням: {task}", 'uk')
+    await message.answer(f"💡 Підказка:\n{response}")
 
 @dp.message(Command('gen_image'))
 async def cmd_gen_image(message: types.Message):
@@ -192,28 +237,103 @@ async def cmd_gen_image(message: types.Message):
     
     await message.answer_photo(image_url)
 
+@dp.message(Command('gen_audio'))
+async def cmd_gen_audio(message: types.Message):
+    text = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+    if not text:
+        return await message.answer("ℹ️ Введіть текст для перетворення в аудіо")
+    
+    audio_buffer, error = await generate_audio(message.from_user.id, text)
+    if error:
+        return await message.answer(error)
+    
+    await message.answer_voice(audio_buffer)
+
+@dp.message(Command('gen_circle'))
+async def cmd_gen_circle(message: types.Message):
+    img_buffer, error = await generate_circle(message.from_user.id)
+    if error:
+        return await message.answer(error)
+    
+    await message.answer_photo(img_buffer)
+
 @dp.message(Command('shawarma'))
 async def cmd_shawarma(message: types.Message):
     facts = [
-        "Шаурма - це найкращий антидепресант!",
-        "Науковці довели: шаурма містить вітамін щастя",
-        "Без шаурми неможливо уявити студентське життя",
-        "Шаурма об'єднує народи - це факт міжнародної дипломатії"
+        "Шаурма – це квинтесенція смаку Всесвіту!",
+        "Науково доведено: шаурма покращує настрій на 127%",
+        "Без шаурми неможливе існування людства. Це факт.",
+        "Шаурма містить всі необхідні вітаміни для щастя"
     ]
     await message.answer(random.choice(facts))
 
-# Допоміжні функції
-async def generate_ai_response(prompt: str, lang: str) -> str:
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}]
+@dp.message(Command('promo_create'), lambda message: message.from_user.id in ADMINS)
+async def cmd_promo_create(message: types.Message):
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        return await message.answer("❌ Формат: /promo_create <тип> <значення> <використань>")
+    
+    promo_type = args[1]
+    promo_value = args[2]
+    uses = int(args[3]) if len(args) > 3 else 1
+    
+    import secrets
+    code = secrets.token_hex(4).upper()
+    
+    cursor.execute(
+        "INSERT INTO promo_codes VALUES (?, ?, ?, ?, ?, ?)",
+        (code, promo_type, promo_value, message.from_user.id, uses, (datetime.now() + timedelta(days=30)).isoformat())
     )
-    return response.choices[0].message['content']
+    conn.commit()
+    
+    await message.answer(f"🎁 Промокод створено:\nКод: <code>{code}</code>\nТип: {promo_type}\nЗначення: {promo_value}")
 
-# Запуск бота
-async def on_startup():
-    await reset_daily_limits()
+@dp.message(Command('promo'))
+async def cmd_promo_activate(message: types.Message):
+    code = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+    if not code:
+        return await message.answer("ℹ️ Введіть промокод після команди")
+    
+    cursor.execute(
+        "SELECT * FROM promo_codes WHERE code = ? AND (uses_left > 0 OR uses_left IS NULL) AND expires_at > ?",
+        (code, datetime.now().isoformat())
+    )
+    promo = cursor.fetchone()
+    
+    if not promo:
+        return await message.answer("❌ Промокод не знайдено або протерміновано")
+    
+    reward_type, reward_value = promo[1], promo[2]
+    user_id = message.from_user.id
+    
+    if reward_type == "images":
+        cursor.execute(
+            "UPDATE limits SET images_left = images_left + ? WHERE user_id = ?",
+            (int(reward_value), user_id)
+        )
+        reward_text = f"🖼 +{reward_value} зображень"
+    elif reward_type == "premium":
+        cursor.execute(
+            "UPDATE users SET premium_until = ? WHERE user_id = ?",
+            ((datetime.now() + timedelta(days=int(reward_value))).isoformat(), user_id)
+        )
+        reward_text = f"🌟 Преміум на {reward_value} днів"
+    else:
+        reward_text = "🎁 Невідома нагорода"
+    
+    cursor.execute(
+        "UPDATE promo_codes SET uses_left = uses_left - 1 WHERE code = ?",
+        (code,)
+    )
+    cursor.execute(
+        "INSERT OR IGNORE INTO activated_promos VALUES (?, ?, ?)",
+        (user_id, code, datetime.now().isoformat())
+    )
+    conn.commit()
+    
+    await message.answer(f"🎉 Промокод активовано!\nОтримано: {reward_text}")
 
+# Система обмежень
 async def reset_daily_limits():
     cursor.execute(
         "UPDATE limits SET images_left = 100, audio_left = 100, circles_left = 100 "
@@ -221,6 +341,11 @@ async def reset_daily_limits():
         (datetime.now().date().isoformat(),)
     )
     conn.commit()
+
+# Запуск бота
+async def on_startup():
+    await reset_daily_limits()
+    logger.info("🔄 Денні ліміти оновлено")
 
 if __name__ == '__main__':
     dp.startup.register(on_startup)
