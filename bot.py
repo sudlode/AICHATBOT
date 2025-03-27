@@ -4,9 +4,9 @@ import random
 import telebot
 from datetime import datetime, timedelta
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont  # Для генерації кружечків
+from PIL import Image, ImageDraw, ImageFont
 from pydub import AudioSegment
-from googlesearch import search  # Для пошуку в Google
+from googlesearch import search
 
 # API ключі
 TOKEN = os.getenv("TOKEN")  # Ваш токен для Telegram бота
