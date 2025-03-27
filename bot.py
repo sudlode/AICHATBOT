@@ -4,18 +4,13 @@ import random
 import telebot
 from datetime import datetime, timedelta
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont  # Для генерації кружечків
 from pydub import AudioSegment
-from googlesearch import search
+from googlesearch import search  # Для пошуку в Google
 
 # API ключі
 TOKEN = os.getenv("TOKEN")  # Ваш токен для Telegram бота
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Ваш ключ для OpenAI
-
-# Перевірка наявності токенів
-if not TOKEN or not OPENAI_API_KEY:
-    print("Error: Missing required environment variables (TOKEN, OPENAI_API_KEY)")
-    exit(1)
 
 # Ініціалізація бота
 bot = telebot.TeleBot(TOKEN)
@@ -213,7 +208,18 @@ def google_search(message):
         results = search(query, num_results=5)
         bot.reply_to(message, "\n".join(results))
     else:
-        bot.reply_to(message, "Please provide a query after the /google command.")
+        bot.reply_to(message, "Please provide a search query.")
 
-# Запуск бота
-bot.polling(none_stop=True)
+# Команда для ГДЗ
+@bot.message_handler(commands=['gdz'])
+def gdz(message):
+    bot.reply_to(message, "Here are some Gdz sites:\n- https://www.gdz.ru/\n- https://gdz-online.com/")
+
+# Команда для перегляду історії користувача
+@bot.message_handler(commands=['history'])
+def history(message):
+    user_id = message.from_user.id
+    history_data = load_history()
+    bot.reply_to(message, str(history_data.get(user_id, "No history found.")))
+
+bot.polling()
