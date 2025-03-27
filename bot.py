@@ -2,15 +2,11 @@ import os
 import json
 import random
 import telebot
-import requests
 from datetime import datetime, timedelta
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont  # Для генерації кружечків
 from pydub import AudioSegment
-from googlesearch import search
-import pytesseract
-from bs4 import BeautifulSoup
-from io import BytesIO
+from googlesearch import search  # Для пошуку в Google
 
 # API ключі
 TOKEN = os.getenv("TOKEN")  # Ваш токен для Telegram бота
@@ -102,23 +98,6 @@ def add_to_history(user_id, text):
     save_history(history)
     return None  # Повертає None, якщо ліміт не досягнуто
 
-# Короткі і правильні відповіді для контрольних
-@bot.message_handler(commands=['kontrolna_tip'])
-def kontrolna_tip(message):
-    subject = message.text.split(' ', 1)[1].lower() if len(message.text.split()) > 1 else ''
-    tips = {
-        'mathematics': "For math, remember to use formulas for area, volume, and algebraic expressions. Example: Area of a circle = pi * r^2.",
-        'physics': "In physics, focus on the main laws of motion and the formulas for energy and force. Example: F = ma.",
-        'chemistry': "In chemistry, remember to balance equations and understand the periodic table. Example: H2 + O2 = H2O.",
-        'history': "For history, focus on key events like the World Wars, revolutions, and major discoveries.",
-        'biology': "For biology, understand cellular processes and the classification of life forms."
-    }
-    
-    if subject in tips:
-        bot.reply_to(message, tips[subject])
-    else:
-        bot.reply_to(message, "Please provide a valid subject. Example: /kontrolna_tip mathematics")
-
 # Генерація текстів про шаурму
 def generate_shawarma_text():
     texts = [
@@ -132,6 +111,7 @@ def generate_shawarma_text():
 
 # Генерація аудіофайлів (звуки шаурми)
 def generate_shawarma_sound():
+    # Створимо простий звук - ви можете додати реальні звуки шаурми, якщо маєте їх у форматі аудіо
     sound = AudioSegment.from_file("shawarma_sound.mp3")  # Замість цього використовуйте ваш власний звуковий файл
     audio_file = BytesIO()
     sound.export(audio_file, format="mp3")
@@ -149,80 +129,91 @@ def generate_circle_image(text):
     bio_image.seek(0)
     return bio_image
 
-# Розпізнавання тексту з фото (OCR)
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    file_info = bot.get_file(message.photo[-1].file_id)
-    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
-    
-    response = requests.get(file_url)
-    img = Image.open(BytesIO(response.content))
-    
-    # Використання pytesseract для розпізнавання тексту
-    text = pytesseract.image_to_string(img)
-    
-    if text:
-        bot.reply_to(message, f"Розпізнаний текст: {text}")
-    else:
-        bot.reply_to(message, "Не вдалося розпізнати текст на фото.")
-
-# Парсинг сайтів з ГДЗ (наприклад, з сайту https://www.gdz.ru/)
-def parse_gdz(query):
-    url = f"https://www.gdz.ru/search/?searchword={query.replace(' ', '+')}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    results = soup.find_all('div', class_='search-result')
-
-    gdz_links = []
-    for result in results:
-        link = result.find('a', href=True)
-        if link:
-            gdz_links.append(f"https://www.gdz.ru{link['href']}")
-    
-    return gdz_links
-
-# Команда для пошуку готових домашніх завдань
-@bot.message_handler(commands=['gdz_search'])
-def gdz_search(message):
-    query = " ".join(message.text.split()[1:])
-    if query:
-        links = parse_gdz(query)
-        if links:
-            bot.reply_to(message, "\n".join(links))
+# Команда для бану користувача (тільки для адміністратора)
+@bot.message_handler(commands=['ban_user'])
+def ban_user(message):
+    if message.from_user.id == int(ADMIN_USER_ID):  # Перевірка чи це адміністратор
+        user_id = int(message.text.split()[1])  # Витягнути ID користувача
+        banned_users = load_banned_users()
+        if user_id not in banned_users:
+            banned_users.append(user_id)
+            save_banned_users(banned_users)
+            bot.reply_to(message, f"User {user_id} has been banned.")
         else:
-            bot.reply_to(message, "No Gdz results found.")
+            bot.reply_to(message, f"User {user_id} is already banned.")
     else:
-        bot.reply_to(message, "Please provide a query to search for Gdz.")
+        bot.reply_to(message, "You are not authorized to ban users.")
 
-# Автоматичний пошук відповідей у Google
-@bot.message_handler(commands=['search_answer'])
-def search_answer(message):
+# Команда для створення промокодів
+@bot.message_handler(commands=['promo_create'])
+def promo_create(message):
+    if message.from_user.id == int(ADMIN_USER_ID):  # Перевірка чи це адміністратор
+        promo_code = message.text.split()[1]  # Витягнути промокод
+        promo_codes = load_promo_codes()
+        if promo_code not in promo_codes:
+            promo_codes.append(promo_code)
+            save_promo_codes(promo_codes)
+            bot.reply_to(message, f"Promo code '{promo_code}' has been created.")
+        else:
+            bot.reply_to(message, f"Promo code '{promo_code}' already exists.")
+    else:
+        bot.reply_to(message, "You are not authorized to create promo codes.")
+
+# Команда для перегляду статистики
+@bot.message_handler(commands=['stats'])
+def stats(message):
+    if message.from_user.id == int(ADMIN_USER_ID):  # Перевірка чи це адміністратор
+        statistics = load_statistics()
+        stats_message = f"Requests: {statistics['requests']}\nBans: {statistics['bans']}\nPromo Codes Used: {statistics['promo_codes_used']}"
+        bot.reply_to(message, stats_message)
+    else:
+        bot.reply_to(message, "You are not authorized to view statistics.")
+
+# Команда для генерації тексту про шаурму
+@bot.message_handler(commands=['shawarma'])
+def shawarma(message):
+    response = add_to_history(message.from_user.id, "/shawarma")
+    if response:
+        bot.reply_to(message, response)
+    else:
+        text = generate_shawarma_text()
+        bot.reply_to(message, text)
+
+# Команда для генерації звуків шаурми
+@bot.message_handler(commands=['shawarma_sound'])
+def shawarma_sound(message):
+    response = add_to_history(message.from_user.id, "/shawarma_sound")
+    if response:
+        bot.reply_to(message, response)
+    else:
+        audio = generate_shawarma_sound()
+        bot.send_audio(message.chat.id, audio)
+
+# Команда для генерації кружечка з текстом
+@bot.message_handler(commands=['circle_image'])
+def circle_image(message):
+    text = "Shawarma!"
+    response = add_to_history(message.from_user.id, "/circle_image")
+    if response:
+        bot.reply_to(message, response)
+    else:
+        image = generate_circle_image(text)
+        bot.send_photo(message.chat.id, image)
+
+# Команда для пошуку в Google
+@bot.message_handler(commands=['google'])
+def google_search(message):
     query = " ".join(message.text.split()[1:])
     if query:
-        results = search(query, num_results=3)
+        results = search(query, num_results=5)
         bot.reply_to(message, "\n".join(results))
     else:
         bot.reply_to(message, "Please provide a search query.")
 
-# Команда для генерації тексту про шаурму
-@bot.message_handler(commands=['shawarma_joke'])
-def shawarma_joke(message):
-    joke = generate_shawarma_text()
-    bot.reply_to(message, joke)
-
-# Команда для генерації аудіофайлу (звуки шаурми)
-@bot.message_handler(commands=['shawarma_sound'])
-def shawarma_sound(message):
-    audio_file = generate_shawarma_sound()
-    bot.send_audio(message.chat.id, audio_file)
-
-# Команда для генерації кружечка з текстом
-@bot.message_handler(commands=['generate_circle'])
-def generate_circle(message):
-    text = message.text.split(' ', 1)[1] if len(message.text.split()) > 1 else 'Shawarma'
-    bio_image = generate_circle_image(text)
-    bot.send_photo(message.chat.id, bio_image)
+# Команда для ГДЗ
+@bot.message_handler(commands=['gdz'])
+def gdz(message):
+    bot.reply_to(message, "Here are some Gdz sites:\n- https://www.gdz.ru\n- https://gdz.com")
 
 # Запуск бота
 bot.polling(none_stop=True)
