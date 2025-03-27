@@ -12,6 +12,11 @@ from googlesearch import search
 TOKEN = os.getenv("TOKEN")  # Ваш токен для Telegram бота
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Ваш ключ для OpenAI
 
+# Перевірка наявності токенів
+if not TOKEN or not OPENAI_API_KEY:
+    print("Error: Missing required environment variables (TOKEN, OPENAI_API_KEY)")
+    exit(1)
+
 # Ініціалізація бота
 bot = telebot.TeleBot(TOKEN)
 
@@ -208,12 +213,7 @@ def google_search(message):
         results = search(query, num_results=5)
         bot.reply_to(message, "\n".join(results))
     else:
-        bot.reply_to(message, "Please provide a search query.")
-
-# Команда для ГДЗ
-@bot.message_handler(commands=['gdz'])
-def gdz(message):
-    bot.reply_to(message, "Here are some Gdz sites:\n- https://www.gdz.ru\n- https://gdz.com")
+        bot.reply_to(message, "Please provide a query after the /google command.")
 
 # Запуск бота
 bot.polling(none_stop=True)
