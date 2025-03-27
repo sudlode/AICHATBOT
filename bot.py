@@ -1,352 +1,228 @@
 import os
-import logging
-import sqlite3
-from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-import openai
-import matplotlib
-matplotlib.use('Agg')
-from matplotlib import pyplot as plt
-from gtts import gTTS
-from PIL import Image, ImageDraw
-import io
+import json
 import random
+import telebot
 import requests
-from deep_translator import GoogleTranslator
+from datetime import datetime, timedelta
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
+from pydub import AudioSegment
+from googlesearch import search
+import pytesseract
+from bs4 import BeautifulSoup
+from io import BytesIO
 
-# Налаштування логування
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# API ключі
+TOKEN = os.getenv("TOKEN")  # Ваш токен для Telegram бота
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Ваш ключ для OpenAI
 
-# Перевірка токенів
-TOKEN = os.getenv("TOKEN", "").strip()
-KEY = os.getenv("KEY", "").strip()
+# Ініціалізація бота
+bot = telebot.TeleBot(TOKEN)
 
-if not TOKEN or ":" not in TOKEN:
-    logger.error("❌ Невірний Telegram токен! Формат: 123456789:ABCdef...")
-    exit(1)
+# Ініціалізація вашого Telegram ID для активації адміністратора
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")  # Ваш ID для адміністратора
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+# Шлях до файлів для збереження історії, заблокованих користувачів та промокодів
+history_file = "history.json"
+banned_users_file = "banned_users.json"
+promo_codes_file = "promo_codes.json"
+statistics_file = "statistics.json"
 
-if KEY:
-    key = KEY
-else:
-    logger.warning("⚠️ OpenAI ключ відсутній - деякі функції обмежені")
+# Завантаження історії
+def load_history():
+    if os.path.exists(history_file):
+        with open(history_file, 'r') as file:
+            return json.load(file)
+    return {}
 
-# База даних
-def get_db():
-    return sqlite3.connect('/tmp/bot.db' if 'RENDER' in os.environ else 'bot.db')
+# Завантаження заблокованих користувачів
+def load_banned_users():
+    if os.path.exists(banned_users_file):
+        with open(banned_users_file, 'r') as file:
+            return json.load(file)
+    return []
 
-conn = get_db()
-cursor = conn.cursor()
+# Завантаження промокодів
+def load_promo_codes():
+    if os.path.exists(promo_codes_file):
+        with open(promo_codes_file, 'r') as file:
+            return json.load(file)
+    return {}
 
-# Ініціалізація таблиць
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    registered_at TEXT,
-    banned_until TEXT,
-    ban_reason TEXT,
-    premium_until TEXT,
-    language TEXT DEFAULT 'uk'
-)''')
+# Завантаження статистики
+def load_statistics():
+    if os.path.exists(statistics_file):
+        with open(statistics_file, 'r') as file:
+            return json.load(file)
+    return {"requests": 0, "bans": 0, "promo_codes_used": 0}
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS limits (
-    user_id INTEGER PRIMARY KEY,
-    images_left INTEGER DEFAULT 100,
-    audio_left INTEGER DEFAULT 100,
-    circles_left INTEGER DEFAULT 100,
-    last_reset_date TEXT
-)''')
+# Збереження історії
+def save_history(history):
+    with open(history_file, 'w') as file:
+        json.dump(history, file)
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS promo_codes (
-    code TEXT PRIMARY KEY,
-    reward_type TEXT,
-    reward_value TEXT,
-    created_by INTEGER,
-    uses_left INTEGER,
-    expires_at TEXT
-)''')
+# Збереження заблокованих користувачів
+def save_banned_users(banned_users):
+    with open(banned_users_file, 'w') as file:
+        json.dump(banned_users, file)
 
-conn.commit()
+# Збереження промокодів
+def save_promo_codes(promo_codes):
+    with open(promo_codes_file, 'w') as file:
+        json.dump(promo_codes, file)
 
-# Константи
-ADMINS = [1119767022]  # Ваш Telegram ID
-LANGUAGES = {'uk': '🇺🇦 Українська', 'en': '🇬🇧 English'}
+# Збереження статистики
+def save_statistics(statistics):
+    with open(statistics_file, 'w') as file:
+        json.dump(statistics, file)
 
-# Клавіатури
-def get_main_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    keyboard.add(
-        KeyboardButton('/kontrolni 📝'),
-        KeyboardButton('/gdz 📚'),
-        KeyboardButton('/spusuvanna ✍️'),
-        KeyboardButton('/promo 🎁'),
-        KeyboardButton('/shawarma 🌯'),
-        KeyboardButton('/help ❓')
-    )
-    return keyboard
+# Додавання запиту в історію
+def add_to_history(user_id, text):
+    banned_users = load_banned_users()
+    if user_id in banned_users:
+        return "You are banned and cannot interact with this bot."
 
-def get_admin_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(
-        KeyboardButton('/promo_create'),
-        KeyboardButton('/promo_list'),
-        KeyboardButton('/ban_user'),
-        KeyboardButton('/unban_user')
-    )
-    return keyboard
-
-# Генерація контенту
-async def generate_image(user_id: int, prompt: str):
-    cursor.execute("SELECT images_left FROM limits WHERE user_id=?", (user_id,))
-    if cursor.fetchone()[0] <= 0:
-        return None, "❌ Ліміт зображень вичерпано (100/день)"
+    history = load_history()
+    if user_id not in history:
+        history[user_id] = {"requests": [], "daily_limit": 0, "last_reset": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
     
-    response = openai.Image.create(
-        prompt=prompt,
-        n=1,
-        size="512x512"
-    )
-    image_url = response['data'][0]['url']
+    # Перевірка ліміту
+    last_reset = datetime.strptime(history[user_id]["last_reset"], "%Y-%m-%d %H:%M:%S")
+    if datetime.now() - last_reset >= timedelta(days=1):
+        history[user_id]["daily_limit"] = 0
+        history[user_id]["last_reset"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    cursor.execute(
-        "UPDATE limits SET images_left = images_left - 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-    
-    return image_url, None
+    # Перевірка на ліміт запитів
+    if history[user_id]["daily_limit"] >= 100:
+        return "You have reached your daily limit of 100 requests. Please try again tomorrow."
 
-async def generate_audio(user_id: int, text: str, lang='uk'):
-    cursor.execute("SELECT audio_left FROM limits WHERE user_id=?", (user_id,))
-    if cursor.fetchone()[0] <= 0:
-        return None, "❌ Ліміт аудіо вичерпано (100/день)"
-    
-    tts = gTTS(text=text, lang=lang)
-    audio_buffer = io.BytesIO()
-    tts.write_to_fp(audio_buffer)
-    audio_buffer.seek(0)
-    
-    cursor.execute(
-        "UPDATE limits SET audio_left = audio_left - 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-    
-    return audio_buffer, None
+    # Додаємо запит
+    history[user_id]["requests"].append({"text": text, "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    history[user_id]["daily_limit"] += 1
+    save_history(history)
+    return None  # Повертає None, якщо ліміт не досягнуто
 
-async def generate_circle(user_id: int):
-    cursor.execute("SELECT circles_left FROM limits WHERE user_id=?", (user_id,))
-    if cursor.fetchone()[0] <= 0:
-        return None, "❌ Ліміт кружечків вичерпано (100/день)"
+# Короткі і правильні відповіді для контрольних
+@bot.message_handler(commands=['kontrolna_tip'])
+def kontrolna_tip(message):
+    subject = message.text.split(' ', 1)[1].lower() if len(message.text.split()) > 1 else ''
+    tips = {
+        'mathematics': "For math, remember to use formulas for area, volume, and algebraic expressions. Example: Area of a circle = pi * r^2.",
+        'physics': "In physics, focus on the main laws of motion and the formulas for energy and force. Example: F = ma.",
+        'chemistry': "In chemistry, remember to balance equations and understand the periodic table. Example: H2 + O2 = H2O.",
+        'history': "For history, focus on key events like the World Wars, revolutions, and major discoveries.",
+        'biology': "For biology, understand cellular processes and the classification of life forms."
+    }
     
-    img = Image.new('RGB', (512, 512), color=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse([(50, 50), (462, 462)], outline='white', width=10)
-    
-    img_buffer = io.BytesIO()
-    img.save(img_buffer, format='PNG')
-    img_buffer.seek(0)
-    
-    cursor.execute(
-        "UPDATE limits SET circles_left = circles_left - 1 WHERE user_id=?",
-        (user_id,)
-    )
-    conn.commit()
-    
-    return img_buffer, None
-
-async def generate_ai_response(prompt: str, lang: str) -> str:
-    if not OPENAI_API_KEY:
-        return "OpenAI API ключ не налаштовано"
-    
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message['content']
-
-# Команди
-@dp.message(Command('start'))
-async def cmd_start(message: types.Message):
-    user_id = message.from_user.id
-    if user_id in ADMINS:
-        await message.answer("👑 Вітаю, адміне!", reply_markup=get_admin_keyboard())
+    if subject in tips:
+        bot.reply_to(message, tips[subject])
     else:
-        await message.answer("🏫 Вітаю у Шкільному помічнику!", reply_markup=get_main_keyboard())
-    
-    cursor.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,))
-    if not cursor.fetchone():
-        cursor.execute(
-            "INSERT INTO users (user_id, username, registered_at) VALUES (?, ?, ?)",
-            (user_id, message.from_user.username, datetime.now().isoformat())
-        )
-        cursor.execute(
-            "INSERT INTO limits (user_id, last_reset_date) VALUES (?, ?)",
-            (user_id, datetime.now().isoformat())
-        )
-        conn.commit()
+        bot.reply_to(message, "Please provide a valid subject. Example: /kontrolna_tip mathematics")
 
-@dp.message(Command('kontrolni'))
-async def cmd_kontrolni(message: types.Message):
-    task = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
-    if not task:
-        return await message.answer("📝 Напишіть завдання після команди")
-    
-    response = await generate_ai_response(f"Розв'яжи контрольну роботу: {task}", 'uk')
-    await message.answer(f"📚 Розв'язок:\n{response}")
-
-@dp.message(Command('gdz'))
-async def cmd_gdz(message: types.Message):
-    task = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
-    if not task:
-        return await message.answer("📖 Напишіть предмет та номер завдання")
-    
-    response = await generate_ai_response(f"Напиши детальний розв'язок для: {task}", 'uk')
-    await message.answer(f"📝 ГДЗ:\n{response}")
-
-@dp.message(Command('spusuvanna'))
-async def cmd_spusuvanna(message: types.Message):
-    task = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
-    if not task:
-        return await message.answer("✍️ Опишіть завдання, з яким потрібна допомога")
-    
-    response = await generate_ai_response(f"Допоможи з виконанням: {task}", 'uk')
-    await message.answer(f"💡 Підказка:\n{response}")
-
-@dp.message(Command('gen_image'))
-async def cmd_gen_image(message: types.Message):
-    prompt = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
-    if not prompt:
-        return await message.answer("ℹ️ Напишіть опис зображення після команди")
-    
-    image_url, error = await generate_image(message.from_user.id, prompt)
-    if error:
-        return await message.answer(error)
-    
-    await message.answer_photo(image_url)
-
-@dp.message(Command('gen_audio'))
-async def cmd_gen_audio(message: types.Message):
-    text = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
-    if not text:
-        return await message.answer("ℹ️ Введіть текст для перетворення в аудіо")
-    
-    audio_buffer, error = await generate_audio(message.from_user.id, text)
-    if error:
-        return await message.answer(error)
-    
-    await message.answer_voice(audio_buffer)
-
-@dp.message(Command('gen_circle'))
-async def cmd_gen_circle(message: types.Message):
-    img_buffer, error = await generate_circle(message.from_user.id)
-    if error:
-        return await message.answer(error)
-    
-    await message.answer_photo(img_buffer)
-
-@dp.message(Command('shawarma'))
-async def cmd_shawarma(message: types.Message):
-    facts = [
-        "Шаурма – це квинтесенція смаку Всесвіту!",
-        "Науково доведено: шаурма покращує настрій на 127%",
-        "Без шаурми неможливе існування людства. Це факт.",
-        "Шаурма містить всі необхідні вітаміни для щастя"
+# Генерація текстів про шаурму
+def generate_shawarma_text():
+    texts = [
+        "Shawarma is life! Every bite is like a party in my mouth!",
+        "Did you know? Shawarma is the secret to happiness! 🌯",
+        "If I could, I would eat Shawarma every day!",
+        "Shawarma is my soulmate. Just like me, it’s rolled up and filled with flavor!",
+        "Who needs love when you have Shawarma? 😋"
     ]
-    await message.answer(random.choice(facts))
+    return random.choice(texts)
 
-@dp.message(Command('promo_create'), lambda message: message.from_user.id in ADMINS)
-async def cmd_promo_create(message: types.Message):
-    args = message.text.split(maxsplit=2)
-    if len(args) < 3:
-        return await message.answer("❌ Формат: /promo_create <тип> <значення> <використань>")
-    
-    promo_type = args[1]
-    promo_value = args[2]
-    uses = int(args[3]) if len(args) > 3 else 1
-    
-    import secrets
-    code = secrets.token_hex(4).upper()
-    
-    cursor.execute(
-        "INSERT INTO promo_codes VALUES (?, ?, ?, ?, ?, ?)",
-        (code, promo_type, promo_value, message.from_user.id, uses, (datetime.now() + timedelta(days=30)).isoformat())
-    )
-    conn.commit()
-    
-    await message.answer(f"🎁 Промокод створено:\nКод: <code>{code}</code>\nТип: {promo_type}\nЗначення: {promo_value}")
+# Генерація аудіофайлів (звуки шаурми)
+def generate_shawarma_sound():
+    sound = AudioSegment.from_file("shawarma_sound.mp3")  # Замість цього використовуйте ваш власний звуковий файл
+    audio_file = BytesIO()
+    sound.export(audio_file, format="mp3")
+    audio_file.seek(0)
+    return audio_file
 
-@dp.message(Command('promo'))
-async def cmd_promo_activate(message: types.Message):
-    code = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
-    if not code:
-        return await message.answer("ℹ️ Введіть промокод після команди")
+# Генерація фото (кружечок з текстом)
+def generate_circle_image(text):
+    img = Image.new('RGB', (200, 200), color=(255, 255, 255))
+    d = ImageDraw.Draw(img)
+    font = ImageFont.load_default()
+    d.text((10, 80), text, fill=(0, 0, 0), font=font)
+    bio_image = BytesIO()
+    img.save(bio_image, format='PNG')
+    bio_image.seek(0)
+    return bio_image
+
+# Розпізнавання тексту з фото (OCR)
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    file_info = bot.get_file(message.photo[-1].file_id)
+    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
     
-    cursor.execute(
-        "SELECT * FROM promo_codes WHERE code = ? AND (uses_left > 0 OR uses_left IS NULL) AND expires_at > ?",
-        (code, datetime.now().isoformat())
-    )
-    promo = cursor.fetchone()
+    response = requests.get(file_url)
+    img = Image.open(BytesIO(response.content))
     
-    if not promo:
-        return await message.answer("❌ Промокод не знайдено або протерміновано")
+    # Використання pytesseract для розпізнавання тексту
+    text = pytesseract.image_to_string(img)
     
-    reward_type, reward_value = promo[1], promo[2]
-    user_id = message.from_user.id
-    
-    if reward_type == "images":
-        cursor.execute(
-            "UPDATE limits SET images_left = images_left + ? WHERE user_id = ?",
-            (int(reward_value), user_id)
-        )
-        reward_text = f"🖼 +{reward_value} зображень"
-    elif reward_type == "premium":
-        cursor.execute(
-            "UPDATE users SET premium_until = ? WHERE user_id = ?",
-            ((datetime.now() + timedelta(days=int(reward_value))).isoformat(), user_id)
-        )
-        reward_text = f"🌟 Преміум на {reward_value} днів"
+    if text:
+        bot.reply_to(message, f"Розпізнаний текст: {text}")
     else:
-        reward_text = "🎁 Невідома нагорода"
-    
-    cursor.execute(
-        "UPDATE promo_codes SET uses_left = uses_left - 1 WHERE code = ?",
-        (code,)
-    )
-    cursor.execute(
-        "INSERT OR IGNORE INTO activated_promos VALUES (?, ?, ?)",
-        (user_id, code, datetime.now().isoformat())
-    )
-    conn.commit()
-    
-    await message.answer(f"🎉 Промокод активовано!\nОтримано: {reward_text}")
+        bot.reply_to(message, "Не вдалося розпізнати текст на фото.")
 
-# Система обмежень
-async def reset_daily_limits():
-    cursor.execute(
-        "UPDATE limits SET images_left = 100, audio_left = 100, circles_left = 100 "
-        "WHERE last_reset_date < ?",
-        (datetime.now().date().isoformat(),)
-    )
-    conn.commit()
+# Парсинг сайтів з ГДЗ (наприклад, з сайту https://www.gdz.ru/)
+def parse_gdz(query):
+    url = f"https://www.gdz.ru/search/?searchword={query.replace(' ', '+')}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    results = soup.find_all('div', class_='search-result')
+
+    gdz_links = []
+    for result in results:
+        link = result.find('a', href=True)
+        if link:
+            gdz_links.append(f"https://www.gdz.ru{link['href']}")
+    
+    return gdz_links
+
+# Команда для пошуку готових домашніх завдань
+@bot.message_handler(commands=['gdz_search'])
+def gdz_search(message):
+    query = " ".join(message.text.split()[1:])
+    if query:
+        links = parse_gdz(query)
+        if links:
+            bot.reply_to(message, "\n".join(links))
+        else:
+            bot.reply_to(message, "No Gdz results found.")
+    else:
+        bot.reply_to(message, "Please provide a query to search for Gdz.")
+
+# Автоматичний пошук відповідей у Google
+@bot.message_handler(commands=['search_answer'])
+def search_answer(message):
+    query = " ".join(message.text.split()[1:])
+    if query:
+        results = search(query, num_results=3)
+        bot.reply_to(message, "\n".join(results))
+    else:
+        bot.reply_to(message, "Please provide a search query.")
+
+# Команда для генерації тексту про шаурму
+@bot.message_handler(commands=['shawarma_joke'])
+def shawarma_joke(message):
+    joke = generate_shawarma_text()
+    bot.reply_to(message, joke)
+
+# Команда для генерації аудіофайлу (звуки шаурми)
+@bot.message_handler(commands=['shawarma_sound'])
+def shawarma_sound(message):
+    audio_file = generate_shawarma_sound()
+    bot.send_audio(message.chat.id, audio_file)
+
+# Команда для генерації кружечка з текстом
+@bot.message_handler(commands=['generate_circle'])
+def generate_circle(message):
+    text = message.text.split(' ', 1)[1] if len(message.text.split()) > 1 else 'Shawarma'
+    bio_image = generate_circle_image(text)
+    bot.send_photo(message.chat.id, bio_image)
 
 # Запуск бота
-async def on_startup():
-    await reset_daily_limits()
-    logger.info("🔄 Денні ліміти оновлено")
-
-if __name__ == '__main__':
-    dp.startup.register(on_startup)
-    dp.run_polling(bot, skip_updates=True)
+bot.polling(none_stop=True)
