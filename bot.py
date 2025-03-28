@@ -52,7 +52,7 @@ def load_promo_codes():
 # Завантаження статистики
 def load_statistics():
     if os.path.exists(statistics_file):
-        with open(statistics_file, 'r') as file:
+        with open(statistics_file, 'r') as file):
             return json.load(file)
     return {"requests": 0, "bans": 0, "promo_codes_used": 0}
 
