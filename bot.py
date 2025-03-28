@@ -7,122 +7,122 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from pydub import AudioSegment
 from googlesearch import search
-from dotenv import load_dotenv  # Add this line to import load_dotenv
+from dotenv import load_dotenv  # Додайте цей рядок для імпорту load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()  # Add this line to load the environment variables
+# Завантажте змінні середовища з файлу .env
+load_dotenv()  # Додайте цей рядок для завантаження змінних середовища
 
-# API keys
-TOKEN = os.getenv("TOKEN")  # Your token for the Telegram bot
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Your key for OpenAI
+# API ключі
+TOKEN = os.getenv("TOKEN")  # Ваш токен для Telegram бота
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Ваш ключ для OpenAI
 
-# Initialize the bot
+# Ініціалізація бота
 bot = telebot.TeleBot(TOKEN)
 
-# Initialize your Telegram ID for activating the administrator
-ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")  # Your ID for the administrator
+# Ініціалізація вашого Telegram ID для активації адміністратора
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")  # Ваш ID для адміністратора
 
-# Path to files for saving history, banned users, and promo codes
+# Шлях до файлів для збереження історії, заблокованих користувачів та промокодів
 history_file = "history.json"
 banned_users_file = "banned_users.json"
 promo_codes_file = "promo_codes.json"
 statistics_file = "statistics.json"
 
-# Load history
+# Завантаження історії
 def load_history():
     if os.path.exists(history_file):
         with open(history_file, 'r') as file:
             return json.load(file)
     return {}
 
-# Load banned users
+# Завантаження заблокованих користувачів
 def load_banned_users():
     if os.path.exists(banned_users_file):
         with open(banned_users_file, 'r') as file:
             return json.load(file)
     return []
 
-# Load promo codes
+# Завантаження промокодів
 def load_promo_codes():
     if os.path.exists(promo_codes_file):
         with open(promo_codes_file, 'r') as file:
             return json.load(file)
     return {}
 
-# Load statistics
+# Завантаження статистики
 def load_statistics():
     if os.path.exists(statistics_file):
         with open(statistics_file, 'r') as file:
             return json.load(file)
     return {"requests": 0, "bans": 0, "promo_codes_used": 0}
 
-# Save history
+# Збереження історії
 def save_history(history):
     with open(history_file, 'w') as file:
         json.dump(history, file)
 
-# Save banned users
+# Збереження заблокованих користувачів
 def save_banned_users(banned_users):
     with open(banned_users_file, 'w') as file:
         json.dump(banned_users, file)
 
-# Save promo codes
+# Збереження промокодів
 def save_promo_codes(promo_codes):
     with open(promo_codes_file, 'w') as file:
         json.dump(promo_codes, file)
 
-# Save statistics
+# Збереження статистики
 def save_statistics(statistics):
     with open(statistics_file, 'w') as file:
         json.dump(statistics, file)
 
-# Add request to history
+# Додавання запиту в історію
 def add_to_history(user_id, text):
     banned_users = load_banned_users()
     if user_id in banned_users:
-        return "You are banned and cannot interact with this bot."
+        return "Ви заблоковані і не можете взаємодіяти з цим ботом."
 
     history = load_history()
     if user_id not in history:
-        history[user_id] = {"requests": [], "daily_limit": 0, "last_reset": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        history[user_id] = {"requests": [], "daily_limit": 0, "last_reset": datetime.now().strftime("%Y-%м-%d %H:%М:%S")}
     
-    # Check limit
-    last_reset = datetime.strptime(history[user_id]["last_reset"], "%Y-%m-%d %H:%M:%S")
+    # Перевірка ліміту
+    last_reset = datetime.strptime(history[user_id]["last_reset"], "%Y-%м-%д %H:%М:%S")
     if datetime.now() - last_reset >= timedelta(days=1):
         history[user_id]["daily_limit"] = 0
-        history[user_id]["last_reset"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        history[user_id]["last_reset"] = datetime.now().strftime("%Y-%м-%д %H:%М:%S")
     
-    # Check request limit
+    # Перевірка на ліміт запитів
     if history[user_id]["daily_limit"] >= 100:
-        return "You have reached your daily limit of 100 requests. Please try again tomorrow."
+        return "Ви досягли свого денного ліміту у 100 запитів. Будь ласка, спробуйте знову завтра."
 
-    # Add request
-    history[user_id]["requests"].append({"text": text, "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    # Додаємо запит
+    history[user_id]["requests"].append({"text": text, "time": datetime.now().strftime("%Y-%м-%д %H:%М:%S")})
     history[user_id]["daily_limit"] += 1
     save_history(history)
-    return None  # Returns None if limit is not reached
+    return None  # Повертає None, якщо ліміт не досягнуто
 
-# Generate shawarma text
+# Генерація текстів про шаурму
 def generate_shawarma_text():
     texts = [
-        "Shawarma is life! Every bite is like a party in my mouth!",
-        "Did you know? Shawarma is the secret to happiness! 🌯",
-        "If I could, I would eat Shawarma every day!",
-        "Shawarma is my soulmate. Just like me, it’s rolled up and filled with flavor!",
-        "Who needs love when you have Shawarma? 😋"
+        "Шаурма - це життя! Кожен шматочок - це як свято у роті!",
+        "Чи знаєте ви? Шаурма - це секрет щастя! 🌯",
+        "Якби я міг, я б їв шаурму кожного дня!",
+        "Шаурма - це моя душа. Як і я, вона згорнута і наповнена смаком!",
+        "Хто потребує любові, коли є шаурма? 😋"
     ]
     return random.choice(texts)
 
-# Generate shawarma sound
+# Генерація аудіофайлів (звуки шаурми)
 def generate_shawarma_sound():
-    # Create a simple sound - you can add real shawarma sounds if you have them in audio format
-    sound = AudioSegment.from_file("shawarma_sound.mp3")  # Use your own sound file instead
+    # Створимо простий звук - ви можете додати реальні звуки шаурми, якщо маєте їх у форматі аудіо
+    sound = AudioSegment.from_file("shawarma_sound.mp3")  # Замість цього використовуйте ваш власний звуковий файл
     audio_file = BytesIO()
     sound.export(audio_file, format="mp3")
     audio_file.seek(0)
     return audio_file
 
-# Generate circle image
+# Генерація фото (кружечок з текстом)
 def generate_circle_image(text):
     img = Image.new('RGB', (200, 200), color=(255, 255, 255))
     d = ImageDraw.Draw(img)
@@ -133,47 +133,47 @@ def generate_circle_image(text):
     bio_image.seek(0)
     return bio_image
 
-# Command to ban user (admin only)
+# Команда для бану користувача (тільки для адміністратора)
 @bot.message_handler(commands=['ban_user'])
 def ban_user(message):
-    if message.from_user.id == int(ADMIN_USER_ID):  # Check if admin
-        user_id = int(message.text.split()[1])  # Extract user ID
+    if message.from_user.id == int(ADMIN_USER_ID):  # Перевірка чи це адміністратор
+        user_id = int(message.text.split()[1])  # Витягнути ID користувача
         banned_users = load_banned_users()
         if user_id not in banned_users:
             banned_users.append(user_id)
             save_banned_users(banned_users)
-            bot.reply_to(message, f"User {user_id} has been banned.")
+            bot.reply_to(message, f"Користувача {user_id} заблоковано.")
         else:
-            bot.reply_to(message, f"User {user_id} is already banned.")
+            bot.reply_to(message, f"Користувач {user_id} вже заблокований.")
     else:
-        bot.reply_to(message, "You are not authorized to ban users.")
+        bot.reply_to(message, "Ви не авторизовані для блокування користувачів.")
 
-# Command to create promo codes (admin only)
+# Команда для створення промокодів
 @bot.message_handler(commands=['promo_create'])
 def promo_create(message):
-    if message.from_user.id == int(ADMIN_USER_ID):  # Check if admin
-        promo_code = message.text.split()[1]  # Extract promo code
+    if message.from_user.id == int(ADMIN_USER_ID):  # Перевірка чи це адміністратор
+        promo_code = message.text.split()[1]  # Витягнути промокод
         promo_codes = load_promo_codes()
         if promo_code not in promo_codes:
             promo_codes.append(promo_code)
             save_promo_codes(promo_codes)
-            bot.reply_to(message, f"Promo code '{promo_code}' has been created.")
+            bot.reply_to(message, f"Промокод '{promo_code}' створено.")
         else:
-            bot.reply_to(message, f"Promo code '{promo_code}' already exists.")
+            bot.reply_to(message, f"Промокод '{promo_code}' вже існує.")
     else:
-        bot.reply_to(message, "You are not authorized to create promo codes.")
+        bot.reply_to(message, "Ви не авторизовані для створення промокодів.")
 
-# Command to view statistics (admin only)
+# Команда для перегляду статистики
 @bot.message_handler(commands=['stats'])
 def stats(message):
-    if message.from_user.id == int(ADMIN_USER_ID):  # Check if admin
+    if message.from_user.id == int(ADMIN_USER_ID):  # Перевірка чи це адміністратор
         statistics = load_statistics()
-        stats_message = f"Requests: {statistics['requests']}\nBans: {statistics['bans']}\nPromo Codes Used: {statistics['promo_codes_used']}"
+        stats_message = f"Запити: {statistics['requests']}\nБлокування: {statistics['bans']}\nВикористані промокоди: {statistics['promo_codes_used']}"
         bot.reply_to(message, stats_message)
     else:
-        bot.reply_to(message, "You are not authorized to view statistics.")
+        bot.reply_to(message, "Ви не авторизовані для перегляду статистики.")
 
-# Command to generate shawarma text
+# Команда для генерації тексту про шаурму
 @bot.message_handler(commands=['shawarma'])
 def shawarma(message):
     response = add_to_history(message.from_user.id, "/shawarma")
@@ -183,7 +183,7 @@ def shawarma(message):
         text = generate_shawarma_text()
         bot.reply_to(message, text)
 
-# Command to generate shawarma sounds
+# Команда для генерації звуків шаурми
 @bot.message_handler(commands=['shawarma_sound'])
 def shawarma_sound(message):
     response = add_to_history(message.from_user.id, "/shawarma_sound")
@@ -193,10 +193,10 @@ def shawarma_sound(message):
         audio = generate_shawarma_sound()
         bot.send_audio(message.chat.id, audio)
 
-# Command to generate circle image with text
+# Команда для генерації кружечка з текстом
 @bot.message_handler(commands=['circle_image'])
 def circle_image(message):
-    text = "Shawarma!"
+    text = "Шаурма!"
     response = add_to_history(message.from_user.id, "/circle_image")
     if response:
         bot.reply_to(message, response)
@@ -204,7 +204,7 @@ def circle_image(message):
         image = generate_circle_image(text)
         bot.send_photo(message.chat.id, image)
 
-# Command for Google search
+# Команда для пошуку в Google
 @bot.message_handler(commands=['google'])
 def google_search(message):
     query = " ".join(message.text.split()[1:])
@@ -212,18 +212,18 @@ def google_search(message):
         results = search(query, num_results=5)
         bot.reply_to(message, "\n".join(results))
     else:
-        bot.reply_to(message, "Please provide a search query.")
+        bot.reply_to(message, "Будь ласка, надайте запит для пошуку.")
 
-# Command for GDZ
+# Команда для ГДЗ
 @bot.message_handler(commands=['gdz'])
 def gdz(message):
-    bot.reply_to(message, "Here are some Gdz sites:\n- https://www.gdz.ru/\n- https://gdz-online.com/")
+    bot.reply_to(message, "Ось деякі сайти з ГДЗ:\n- https://www.gdz.ru/\n- https://gdz-online.com/")
 
-# Command to view user history
+# Команда для перегляду історії користувача
 @bot.message_handler(commands=['history'])
 def history(message):
     user_id = message.from_user.id
     history_data = load_history()
-    bot.reply_to(message, str(history_data.get(user_id, "No history found.")))
+    bot.reply_to(message, str(history_data.get(user_id, "Історія не знайдена.")))
 
 bot.polling()
